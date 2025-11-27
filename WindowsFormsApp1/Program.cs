@@ -11,7 +11,190 @@ using System.Threading.Tasks;
 
 namespace TextFileViewer
 {
-    public partial class Form1 : Form
+    public class EventLogger
+    {
+        private static EventLogger instance_ = null;
+
+        private EventLogger()
+        {
+            events_ = new List<LogEvent>();
+            Console.WriteLine("[EventLogger] Створено екземпляр логера");
+        }
+
+        public static EventLogger Instance
+        {
+            get
+            {
+                if (instance_ == null)
+                {
+                    instance_ = new EventLogger();
+                }
+                return instance_;
+            }
+        }
+
+        // Список всіх подій
+        private List<LogEvent> events_;
+
+        /// Додає подію до журналу
+        public void LogEvent(EventType type, int lineNumber, int charPosition, string text)
+        {
+            LogEvent logEvent = new LogEvent
+            {
+                Timestamp = DateTime.Now,
+                Type = type,
+                LineNumber = lineNumber,
+                CharPosition = charPosition,
+                Text = text
+            };
+
+            events_.Add(logEvent);
+
+            Console.WriteLine($"[LOG] {logEvent}");
+        }
+
+        /// Отримує всі події
+        public List<LogEvent> GetAllEvents()
+        {
+            return new List<LogEvent>(events_);
+        }
+
+        /// Отримує останні N подій
+        public List<LogEvent> GetRecentEvents(int count)
+        {
+            int startIndex = Math.Max(0, events_.Count - count);
+            return events_.GetRange(startIndex, Math.Min(count, events_.Count));
+        }
+
+        /// Отримує події за типом
+        public List<LogEvent> GetEventsByType(EventType type)
+        {
+            List<LogEvent> result = new List<LogEvent>();
+            foreach (var evt in events_)
+            {
+                if (evt.Type == type)
+                    result.Add(evt);
+            }
+            return result;
+        }
+
+        /// Очищає всі події
+        public void ClearLog()
+        {
+            events_.Clear();
+            Console.WriteLine("[EventLogger] Журнал очищено");
+        }
+
+        /// Отримує кількість подій
+        public int EventCount => events_.Count;
+
+        /// Зберігає журнал у файл
+        public void SaveToFile(string filePath)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("========================================");
+            sb.AppendLine("ЖУРНАЛ ПОДІЙ ТЕКСТОВОГО РЕДАКТОРА");
+            sb.AppendLine("========================================");
+            sb.AppendLine();
+            sb.AppendLine($"Всього подій: {events_.Count}");
+            sb.AppendLine($"Дата створення звіту: {DateTime.Now}");
+            sb.AppendLine();
+            sb.AppendLine("========================================");
+            sb.AppendLine();
+
+            foreach (var evt in events_)
+            {
+                sb.AppendLine(evt.ToDetailedString());
+                sb.AppendLine(new string('-', 60));
+            }
+
+            File.WriteAllText(filePath, sb.ToString(), Encoding.UTF8);
+        }
+
+        /// Отримує статистику подій
+        public string GetStatistics()
+        {
+            int addCount = 0;
+            int deleteCount = 0;
+            int pasteCount = 0;
+            int cutCount = 0;
+
+            foreach (var evt in events_)
+            {
+                switch (evt.Type)
+                {
+                    case EventType.CharAdded: addCount++; break;
+                    case EventType.CharDeleted: deleteCount++; break;
+                  
+                }
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("========== СТАТИСТИКА ПОДІЙ ==========");
+            sb.AppendLine();
+            sb.AppendLine($"Всього подій: {events_.Count}");
+            sb.AppendLine();
+            sb.AppendLine($"Додано символів: {addCount}");
+            sb.AppendLine($"Видалено символів: {deleteCount}");
+            sb.AppendLine();
+
+            if (events_.Count > 0)
+            {
+                sb.AppendLine($"Перша подія: {events_[0].Timestamp:HH:mm:ss}");
+                sb.AppendLine($"Остання подія: {events_[events_.Count - 1].Timestamp:HH:mm:ss}");
+            }
+
+            return sb.ToString();
+        }
+    }
+
+    
+
+    // Типи подій для протоколювання
+    public enum EventType
+    {
+        CharAdded,      /// Додано символ
+        CharDeleted,    /// Видалено символ
+    }
+
+    // Клас для зберігання інформації про подію
+    public class LogEvent
+    {
+        public DateTime Timestamp { get; set; }
+        public EventType Type { get; set; }
+        public int LineNumber { get; set; }
+        public int CharPosition { get; set; }
+        public string Text { get; set; }
+
+        public override string ToString()
+        {
+            string typeStr = GetEventTypeString(Type);
+            return $"{Timestamp:HH:mm:ss.fff} | {typeStr} | Рядок:{LineNumber} Поз:{CharPosition} | '{Text}'";
+        }
+
+        public string ToDetailedString()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine($"Час: {Timestamp:dd.MM.yyyy HH:mm:ss.fff}");
+            sb.AppendLine($"Тип події: {GetEventTypeString(Type)}");
+            sb.AppendLine($"Позиція: Рядок {LineNumber}, Символ {CharPosition}");
+            sb.AppendLine($"Текст: '{Text}'");
+            return sb.ToString();
+        }
+
+        private string GetEventTypeString(EventType type)
+        {
+            switch (type)
+            {
+                case EventType.CharAdded: return "Додано символ";
+                case EventType.CharDeleted: return "Видалено символ";
+           
+                default: return "Невідома подія";
+            }
+        }
+    }
+
+public partial class Form1 : Form
     {
         private TextBox source;
         private OpenFileDialog openFileDialog;
@@ -20,6 +203,7 @@ namespace TextFileViewer
         private string currentFilePath = "";
         private static readonly HttpClient httpClient = new HttpClient();
 
+        private string previousText = "";
         public Form1()
         {
             InitializeComponent();
@@ -153,11 +337,35 @@ namespace TextFileViewer
 
             webMenu.DropDownItems.Add(loadNews);
 
+            // МЕНЮ: LOG
+
+            ToolStripMenuItem logMenu = new ToolStripMenuItem("Log");
+
+            ToolStripMenuItem showLog = new ToolStripMenuItem("Показати журнал подій");
+            showLog.ShortcutKeys = Keys.F6;
+            showLog.Click += ShowLog_Click;
+
+            ToolStripMenuItem showLogStats = new ToolStripMenuItem("Статистика подій");
+            showLogStats.Click += ShowLogStats_Click;
+
+            ToolStripMenuItem saveLog = new ToolStripMenuItem("Зберегти журнал у файл...");
+            saveLog.Click += SaveLog_Click;
+
+            ToolStripMenuItem clearLog = new ToolStripMenuItem("Очистити журнал");
+            clearLog.Click += ClearLog_Click;
+
+            logMenu.DropDownItems.Add(showLog);
+            logMenu.DropDownItems.Add(showLogStats);
+            logMenu.DropDownItems.Add(new ToolStripSeparator());
+            logMenu.DropDownItems.Add(saveLog);
+            logMenu.DropDownItems.Add(clearLog);
+
+            menuStrip.Items.Add(logMenu);
+
             // Меню About
             ToolStripMenuItem aboutMenu = new ToolStripMenuItem("About");
             aboutMenu.Click += AboutMenu_Click;
 
-            // Додавання меню до MenuStrip
             menuStrip.Items.Add(fileMenu);
             menuStrip.Items.Add(editMenu);
             menuStrip.Items.Add(searchMenu);
@@ -177,6 +385,11 @@ namespace TextFileViewer
             source.WordWrap = false;
             this.Controls.Add(source);
 
+            source.TextChanged += Source_TextChanged;
+
+            var logger = EventLogger.Instance;
+            Console.WriteLine("EventLogger ініціалізовано");
+
             openFileDialog = new OpenFileDialog();
             openFileDialog.Filter = "Text files|*.txt|C# files|*.cs|All files|*.*";
 
@@ -184,31 +397,128 @@ namespace TextFileViewer
             saveFileDialog.Filter = "Text files|*.txt|C# files|*.cs|All files|*.*";
         }
 
-        // File Menu
-        private void NewFile_Click(object sender, EventArgs e)
+        private void Source_TextChanged(object sender, EventArgs e)
         {
-            if (!string.IsNullOrEmpty(source.Text))
+            try
             {
-                DialogResult result = MessageBox.Show(
-                    "Зберегти поточний файл?",
-                    "Новий файл",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
+                string currentText = source.Text;
 
-                if (result == DialogResult.Yes)
+                if (currentText.Length > previousText.Length)
                 {
-                    SaveFile_Click(sender, e);
+                    // Додано текст
+                    int diffLength = currentText.Length - previousText.Length;
+                    string addedText = "";
+
+                    // Знаходимо позицію зміни
+                    int changePos = FindChangePosition(previousText, currentText);
+
+                    if (changePos >= 0 && changePos + diffLength <= currentText.Length)
+                    {
+                        addedText = currentText.Substring(changePos, diffLength);
+                    }
+
+                    // Обчислюємо позицію курсору
+                    int position = source.SelectionStart;
+                    var lineInfo = GetLineAndCharPosition(position);
+
+                    // Логуємо подію
+                    if (diffLength == 1)
+                    {
+                        EventLogger.Instance.LogEvent(
+                            EventType.CharAdded,
+                            lineInfo.Line,
+                            lineInfo.Char,
+                            addedText
+                        );
+                    }
+                    else
+                    {
+                        EventLogger.Instance.LogEvent(
+                            EventType.CharAdded,
+                            lineInfo.Line,
+                            lineInfo.Char,
+                            addedText.Length > 50 ? addedText.Substring(0, 50) + "..." : addedText
+                        );
+                    }
                 }
-                else if (result == DialogResult.Cancel)
+                else if (currentText.Length < previousText.Length)
                 {
-                    return;
+                    // Видалено текст
+                    int diffLength = previousText.Length - currentText.Length;
+
+                    int changePos = FindChangePosition(currentText, previousText);
+                    string deletedText = "";
+
+                    if (changePos >= 0 && changePos + diffLength <= previousText.Length)
+                    {
+                        deletedText = previousText.Substring(changePos, diffLength);
+                    }
+
+                    int position = source.SelectionStart;
+                    var lineInfo = GetLineAndCharPosition(position);
+
+                    EventLogger.Instance.LogEvent(
+                        EventType.CharDeleted,
+                        lineInfo.Line,
+                        lineInfo.Char,
+                        deletedText.Length > 50 ? deletedText.Substring(0, 50) + "..." : deletedText
+                    );
+                }
+
+                previousText = currentText;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Помилка логування: {ex.Message}");
+            }
+        }
+
+        
+        /// Обробник натискання клавіш
+      
+
+      
+        /// Знаходить позицію першої зміни між двома текстами
+        private int FindChangePosition(string oldText, string newText)
+        {
+            int minLength = Math.Min(oldText.Length, newText.Length);
+
+            for (int i = 0; i < minLength; i++)
+            {
+                if (oldText[i] != newText[i])
+                    return i;
+            }
+
+            return minLength;
+        }
+
+        /// Обчислює номер рядка та позицію символу в рядку
+        private (int Line, int Char) GetLineAndCharPosition(int absolutePosition)
+        {
+            if (string.IsNullOrEmpty(source.Text) || absolutePosition < 0)
+                return (1, 1);
+
+            int line = 1;
+            int charPos = 1;
+
+            for (int i = 0; i < Math.Min(absolutePosition, source.Text.Length); i++)
+            {
+                if (source.Text[i] == '\n')
+                {
+                    line++;
+                    charPos = 1;
+                }
+                else
+                {
+                    charPos++;
                 }
             }
 
-            source.Clear();
-            currentFilePath = "";
-            this.Text = "Текстовий редактор - Новий документ";
+            return (line, charPos);
         }
+
+
+        // File Menu
 
         private void OpenFile_Click(object sender, EventArgs e)
         {
@@ -255,6 +565,128 @@ namespace TextFileViewer
                     MessageBox.Show("Помилка збереження: " + ex.Message,
                         "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
+            }
+        }
+
+        private void NewFile_Click(object sender, EventArgs e)
+        {
+            if (!string.IsNullOrEmpty(source.Text))
+            {
+                DialogResult result = MessageBox.Show(
+                    "Зберегти поточний файл?",
+                    "Новий файл",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                {
+                    SaveFile_Click(sender, e);
+                }
+                else if (result == DialogResult.Cancel)
+                {
+                    return;
+                }
+            }
+
+            source.Clear();
+            previousText = ""; 
+            currentFilePath = "";
+            this.Text = "Текстовий редактор - Новий документ";
+
+        }
+        private void ShowLog_Click(object sender, EventArgs e)
+        {
+            var events = EventLogger.Instance.GetAllEvents();
+
+            if (events.Count == 0)
+            {
+                MessageBox.Show("Журнал подій порожній!", "Журнал подій",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            Form logForm = new Form();
+            logForm.Text = $"Журнал подій ({events.Count} записів)";
+            logForm.Size = new Size(800, 600);
+            logForm.StartPosition = FormStartPosition.CenterParent;
+
+            TextBox logBox = new TextBox();
+            logBox.Multiline = true;
+            logBox.ScrollBars = ScrollBars.Both;
+            logBox.Dock = DockStyle.Fill;
+            logBox.ReadOnly = true;
+            logBox.Font = new Font("Consolas", 9);
+            logBox.WordWrap = false;
+
+            StringBuilder logText = new StringBuilder();
+            logText.AppendLine("========== ЖУРНАЛ ПОДІЙ РЕДАКТОРА ==========");
+            logText.AppendLine($"Всього подій: {events.Count}");
+            logText.AppendLine();
+
+            // останні 500 подій
+            var recentEvents = events.Count > 500
+                ? events.GetRange(events.Count - 500, 500)
+                : events;
+
+            foreach (var evt in recentEvents)
+            {
+                logText.AppendLine(evt.ToString());
+            }
+
+            if (events.Count > 500)
+            {
+                logText.AppendLine();
+                logText.AppendLine($"(Показано останні 500 з {events.Count} подій)");
+            }
+
+            logBox.Text = logText.ToString();
+            logForm.Controls.Add(logBox);
+            logForm.ShowDialog();
+        }
+
+        private void ShowLogStats_Click(object sender, EventArgs e)
+        {
+            string stats = EventLogger.Instance.GetStatistics();
+
+            MessageBox.Show(stats, "Статистика подій",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void SaveLog_Click(object sender, EventArgs e)
+        {
+            SaveFileDialog saveLogDialog = new SaveFileDialog();
+            saveLogDialog.Filter = "Text files|*.txt|All files|*.*";
+            saveLogDialog.FileName = $"EventLog_{DateTime.Now:yyyyMMdd_HHmmss}.txt";
+
+            if (saveLogDialog.ShowDialog() == DialogResult.OK)
+            {
+                try
+                {
+                    EventLogger.Instance.SaveToFile(saveLogDialog.FileName);
+                    MessageBox.Show("Журнал подій збережено!", "Успіх",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Помилка збереження журналу: {ex.Message}",
+                        "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void ClearLog_Click(object sender, EventArgs e)
+        {
+            DialogResult result = MessageBox.Show(
+                "Ви впевнені, що хочете очистити весь журнал подій?",
+                "Підтвердження",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Yes)
+            {
+                EventLogger.Instance.ClearLog();
+                MessageBox.Show("Журнал подій очищено!", "Успіх",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
 
@@ -918,6 +1350,8 @@ namespace TextFileViewer
 
             return text;
         }
+
+
 
         // About Menu
         private void AboutMenu_Click(object sender, EventArgs e)
