@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading.Tasks;
 
+
 namespace TextFileViewer
 {
     public class EventLogger
@@ -148,13 +149,12 @@ namespace TextFileViewer
         }
     }
 
-    
-
+ 
     // Типи подій для протоколювання
     public enum EventType
     {
-        CharAdded,      /// Додано символ
-        CharDeleted,    /// Видалено символ
+        CharAdded,      
+        CharDeleted,   
     }
 
     // Клас для зберігання інформації про подію
@@ -353,6 +353,12 @@ public partial class Form1 : Form
 
             ToolStripMenuItem clearLog = new ToolStripMenuItem("Очистити журнал");
             clearLog.Click += ClearLog_Click;
+            // У InitializeComponent в меню "Log":
+
+            ToolStripMenuItem quickTest = new ToolStripMenuItem("Швидкий тест Singleton");
+            quickTest.ShortcutKeys = Keys.F7;
+            quickTest.Click += (s, e) => QuickSingletonTest.ShowQuickTest();
+            logMenu.DropDownItems.Add(quickTest);
 
             logMenu.DropDownItems.Add(showLog);
             logMenu.DropDownItems.Add(showLogStats);
@@ -421,23 +427,16 @@ public partial class Form1 : Form
                     int position = source.SelectionStart;
                     var lineInfo = GetLineAndCharPosition(position);
 
-                    // Логуємо подію
-                    if (diffLength == 1)
+                    for (int i = 0; i < addedText.Length; i++)
                     {
+                        char ch = addedText[i];
+                        var charLineInfo = GetLineAndCharPosition(changePos + i);
+
                         EventLogger.Instance.LogEvent(
                             EventType.CharAdded,
-                            lineInfo.Line,
-                            lineInfo.Char,
-                            addedText
-                        );
-                    }
-                    else
-                    {
-                        EventLogger.Instance.LogEvent(
-                            EventType.CharAdded,
-                            lineInfo.Line,
-                            lineInfo.Char,
-                            addedText.Length > 50 ? addedText.Substring(0, 50) + "..." : addedText
+                            charLineInfo.Line,
+                            charLineInfo.Char,
+                            ch.ToString()
                         );
                     }
                 }
@@ -455,14 +454,19 @@ public partial class Form1 : Form
                     }
 
                     int position = source.SelectionStart;
-                    var lineInfo = GetLineAndCharPosition(position);
 
-                    EventLogger.Instance.LogEvent(
-                        EventType.CharDeleted,
-                        lineInfo.Line,
-                        lineInfo.Char,
-                        deletedText.Length > 50 ? deletedText.Substring(0, 50) + "..." : deletedText
-                    );
+                    for (int i = 0; i < deletedText.Length; i++)
+                    {
+                        char ch = deletedText[i];
+                        var charLineInfo = GetLineAndCharPosition(changePos + i);
+
+                        EventLogger.Instance.LogEvent(
+                            EventType.CharDeleted,
+                            charLineInfo.Line,
+                            charLineInfo.Char,
+                            ch.ToString()
+                        );
+                    }
                 }
 
                 previousText = currentText;
@@ -473,11 +477,6 @@ public partial class Form1 : Form
             }
         }
 
-        
-        /// Обробник натискання клавіш
-      
-
-      
         /// Знаходить позицію першої зміни між двома текстами
         private int FindChangePosition(string oldText, string newText)
         {
@@ -1375,6 +1374,126 @@ public partial class Form1 : Form
                 MessageBoxIcon.Information);
         }
 
+        public class QuickSingletonTest
+        {
+            public static void ShowQuickTest()
+            {
+                StringBuilder result = new StringBuilder();
+
+
+                result.AppendLine("ТЕСТ 1: Отримання трьох екземплярів");
+
+                var logger1 = EventLogger.Instance;
+                var logger2 = EventLogger.Instance;
+                var logger3 = EventLogger.Instance;
+
+                result.AppendLine("var logger1 = EventLogger.Instance;");
+                result.AppendLine("var logger2 = EventLogger.Instance;");
+                result.AppendLine("var logger3 = EventLogger.Instance;");
+                result.AppendLine();
+
+                result.AppendLine("ТЕСТ 2: Порівняння посилань");
+         
+                bool test1 = (logger1 == logger2);
+                bool test2 = (logger2 == logger3);
+                bool test3 = ReferenceEquals(logger1, logger3);
+
+                result.AppendLine($"logger1 == logger2:           {test1}  {GetStatus(test1)}");
+                result.AppendLine($"logger2 == logger3:           {test2}  {GetStatus(test2)}");
+                result.AppendLine($"ReferenceEquals(logger1, logger3):  {test3}  {GetStatus(test3)}");
+                result.AppendLine();
+
+                result.AppendLine("ТЕСТ 3: Перевірка HashCode (адреса в пам'яті)");
+             
+                int hash1 = logger1.GetHashCode();
+                int hash2 = logger2.GetHashCode();
+                int hash3 = logger3.GetHashCode();
+
+                result.AppendLine($"logger1.GetHashCode(): {hash1}");
+                result.AppendLine($"logger2.GetHashCode(): {hash2}");
+                result.AppendLine($"logger3.GetHashCode(): {hash3}");
+                result.AppendLine();
+
+                bool sameHash = (hash1 == hash2 && hash2 == hash3);
+                result.AppendLine($"Всі HashCode однакові? {sameHash}  {GetStatus(sameHash)}");
+                result.AppendLine();
+
+                result.AppendLine("ТЕСТ 4: Перевірка спільних даних");
+               
+                // Очищаємо журнал
+                EventLogger.Instance.ClearLog();
+                result.AppendLine("EventLogger.Instance.ClearLog();");
+                result.AppendLine();
+
+                // logger1 додає подію
+                result.AppendLine("logger1.LogEvent(...);  // Додаємо 1 подію");
+                logger1.LogEvent(EventType.CharAdded, 1, 1, "Тест");
+
+                int count1 = logger1.EventCount;
+                int count2 = logger2.EventCount;
+                int count3 = logger3.EventCount;
+
+                result.AppendLine($"logger1.EventCount: {count1}");
+                result.AppendLine($"logger2.EventCount: {count2}");
+                result.AppendLine($"logger3.EventCount: {count3}");
+                result.AppendLine();
+
+                bool sameCount = (count1 == count2 && count2 == count3 && count1 == 1);
+                result.AppendLine($"Всі бачать 1 подію? {sameCount}  {GetStatus(sameCount)}");
+                result.AppendLine();
+
+
+                bool allPassed = test1 && test2 && test3 && sameHash && sameCount;
+
+                if (allPassed)
+                {
+                    result.AppendLine(" ВСІ ТЕСТИ ПРОЙДЕНО!");
+                    result.AppendLine();
+                    result.AppendLine(" ДОВЕДЕНО:");
+                    result.AppendLine("  Існує лише ОДИН екземпляр EventLogger");
+                    result.AppendLine("  Всі змінні вказують на ОДИН об'єкт");
+                    result.AppendLine("  Дані спільні для всіх посилань");
+                    result.AppendLine("  EventLogger - справжній Singleton!");
+                }
+                else
+                {
+                    result.AppendLine("ДЕЯКІ ТЕСТИ НЕ ПРОЙДЕНО!");
+                    result.AppendLine("EventLogger НЕ відповідає патерну Singleton");
+                }
+
+                // Показуємо результат
+                Form resultForm = new Form();
+                resultForm.Text = allPassed ? "Тест пройдено" : "Тест не пройдено";
+                resultForm.Size = new Size(650, 700);
+                resultForm.StartPosition = FormStartPosition.CenterScreen;
+
+                TextBox txtResult = new TextBox();
+                txtResult.Multiline = true;
+                txtResult.ScrollBars = ScrollBars.Vertical;
+                txtResult.Dock = DockStyle.Fill;
+                txtResult.Font = new Font("Consolas", 10);
+                txtResult.ReadOnly = true;
+                txtResult.Text = result.ToString();
+               
+                Button btnClose = new Button();
+                btnClose.Text = "Закрити";
+                btnClose.Dock = DockStyle.Bottom;
+                btnClose.Height = 40;
+                btnClose.Font = new Font("Arial", 10, FontStyle.Bold);
+                btnClose.Click += (s, e) => resultForm.Close();
+
+                resultForm.Controls.Add(txtResult);
+                resultForm.Controls.Add(btnClose);
+
+                resultForm.ShowDialog();
+            }
+
+            private static string GetStatus(bool passed)
+            {
+                return passed ? "PASS" : "FAIL";
+            }
+        }
+
         [STAThread]
         static void Main()
         {
@@ -1383,6 +1502,7 @@ public partial class Form1 : Form
             Application.Run(new Form1());
         }
     }
+
 
     // Клас для зберігання інформації про новину
     public class NewsItem
