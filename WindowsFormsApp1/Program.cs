@@ -15,7 +15,217 @@ namespace TextFileViewer
     using System;
     using System.Reflection;
 
-  
+    // Базові інтерфейси для завантажувачів та зберігачів
+    public interface IFileLoader
+    {
+        string Load(string filePath);
+    }
+
+    public interface IFileSaver
+    {
+        void Save(string filePath, string content);
+    }
+
+    // Абстрактна фабрика
+    public abstract class FileFactory
+    {
+        public abstract IFileLoader CreateLoader();
+        public abstract IFileSaver CreateSaver();
+    }
+
+    public class TXTFactory : FileFactory
+    {
+        public override IFileLoader CreateLoader()
+        {
+            return new TXTLoader();
+        }
+
+        public override IFileSaver CreateSaver()
+        {
+            return new TXTSaver();
+        }
+    }
+    public class TXTLoader : IFileLoader
+    {
+        public string Load(string filePath)
+        {
+            StringBuilder content = new StringBuilder();
+
+            using (StreamReader reader = new StreamReader(filePath, Encoding.UTF8))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    content.Append(line + Environment.NewLine);
+                }
+            }
+
+            return content.ToString();
+        }
+    }
+
+    public class TXTSaver : IFileSaver
+    {
+        public void Save(string filePath, string content)
+        {
+            File.WriteAllText(filePath, content, Encoding.UTF8);
+        }
+    }
+
+
+    public class HTMLFactory : FileFactory
+    {
+        public override IFileLoader CreateLoader()
+        {
+            return new HTMLLoader();
+        }
+
+        public override IFileSaver CreateSaver()
+        {
+            return new HTMLSaver();
+        }
+    }
+
+    public class HTMLLoader : IFileLoader
+    {
+        public string Load(string filePath)
+        {
+            string htmlContent = File.ReadAllText(filePath, Encoding.UTF8);
+            string text = htmlContent;
+
+            // \r\n для <br>
+            text = Regex.Replace(text, @"<br\s*/?>", "\r\n", RegexOptions.IgnoreCase);
+
+            // Для абзаців використовуємо подвійний \r\n
+            text = Regex.Replace(text, @"</p>", "\r\n\r\n", RegexOptions.IgnoreCase);
+
+            // Видаляємо відкриваючі теги <p>
+            text = Regex.Replace(text, @"<p[^>]*>", "", RegexOptions.IgnoreCase);
+
+            // Видаляємо всі інші HTML теги
+            text = Regex.Replace(text, @"<[^>]+>", "");
+
+            // Декодуємо HTML entities
+            text = System.Net.WebUtility.HtmlDecode(text);
+
+            //Нормалізація порожніх рядків через \r\n
+            text = Regex.Replace(text, @"(\r?\n){3,}", "\r\n\r\n");
+
+            text = text.Trim();
+
+            return text;
+        }
+    }
+
+    public class HTMLSaver : IFileSaver
+    {
+        public void Save(string filePath, string content)
+        {
+            StringBuilder html = new StringBuilder();
+            html.AppendLine("<!DOCTYPE html>");
+            html.AppendLine("<html>");
+            html.AppendLine("<head>");
+            html.AppendLine("    <meta charset=\"UTF-8\">");
+            html.AppendLine("    <title>Document</title>");
+            html.AppendLine("</head>");
+            html.AppendLine("<body>");
+            html.AppendLine();
+
+            string[] paragraphs = content.Split(new[] { "\r\n\r\n", "\n\n" }, StringSplitOptions.None);
+
+            foreach (string paragraph in paragraphs)
+            {
+                if (!string.IsNullOrWhiteSpace(paragraph))
+                {
+                    // Розбиваємо абзац на рядки
+                    string[] lines = paragraph.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+
+                    // HTML-кодуємо лише текст, а перенос рядка замінюємо на <br>
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        lines[i] = System.Net.WebUtility.HtmlEncode(lines[i]);
+                    }
+
+                    string safeParagraph = string.Join("<br>", lines);
+
+                    html.AppendLine($"    <p>{safeParagraph}</p>");
+                }
+            }
+
+            html.AppendLine();
+            html.AppendLine("</body>");
+            html.AppendLine("</html>");
+
+            File.WriteAllText(filePath, html.ToString(), Encoding.UTF8);
+        }
+    }
+
+
+    public class BINFactory : FileFactory
+    {
+        public override IFileLoader CreateLoader()
+        {
+            return new BINLoader();
+        }
+
+        public override IFileSaver CreateSaver()
+        {
+            return new BINSaver();
+        }
+    }
+
+    public class BINLoader : IFileLoader
+    {
+        public string Load(string filePath)
+        {
+            byte[] bytes = File.ReadAllBytes(filePath);
+
+            try
+            {
+                return Encoding.UTF8.GetString(bytes);
+            }
+            catch
+            {
+                // Якщо не вдалося, повертаємо як hex-представлення
+                return BitConverter.ToString(bytes).Replace("-", " ");
+            }
+        }
+    }
+
+    public class BINSaver : IFileSaver
+    {
+        public void Save(string filePath, string content)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(content);
+            File.WriteAllBytes(filePath, bytes);
+        }
+    }
+    public static class FileFactoryManager
+    {
+        public static FileFactory GetFactory(string filePath)
+        {
+            string extension = Path.GetExtension(filePath).ToLower();
+
+            switch (extension)
+            {
+                case ".html":
+                case ".htm":
+                    return new HTMLFactory();
+
+                case ".txt":
+                case ".cs":
+                    return new TXTFactory();
+
+                case ".bin":
+                case ".dat":
+                    return new BINFactory();
+
+                default:
+                    return new TXTFactory();
+            }
+        }
+    }
+
     public class Singleton<T> where T : class
     {
         private static T instance_;
@@ -77,10 +287,8 @@ namespace TextFileViewer
 
             events_.Add(logEvent);
 
-            Console.WriteLine($"[LOG] {logEvent}");
         }
 
-        /// Отримує всі події
         public List<LogEvent> GetAllEvents()
         {
             return new List<LogEvent>(events_);
@@ -105,17 +313,14 @@ namespace TextFileViewer
             return result;
         }
 
-        /// Очищає всі події
         public void ClearLog()
         {
             events_.Clear();
             Console.WriteLine("[EventLogger] Журнал очищено");
         }
 
-        /// Отримує кількість подій
         public int EventCount => events_.Count;
 
-        /// Зберігає журнал у файл
         public void SaveToFile(string filePath)
         {
             StringBuilder sb = new StringBuilder();
@@ -230,6 +435,7 @@ public partial class Form1 : Form
         private static readonly HttpClient httpClient = new HttpClient();
 
         private string previousText = "";
+        private bool isLoadingFile = false;
         public Form1()
         {
             InitializeComponent();
@@ -422,14 +628,17 @@ public partial class Form1 : Form
             Console.WriteLine("EventLogger ініціалізовано");
 
             openFileDialog = new OpenFileDialog();
-            openFileDialog.Filter = "Text files|*.txt|C# files|*.cs|All files|*.*";
+            openFileDialog.Filter = "All supported|*.txt;*.html;*.htm;*.bin;*.dat;*.cs|Text files|*.txt|HTML files|*.html;*.htm|Binary files|*.bin;*.dat|C# files|*.cs|All files|*.*";
 
             saveFileDialog = new SaveFileDialog();
-            saveFileDialog.Filter = "Text files|*.txt|C# files|*.cs|All files|*.*";
+            saveFileDialog.Filter = "Text files|*.txt|HTML files|*.html|Binary files|*.bin|C# files|*.cs|All files|*.*";
         }
 
         private void Source_TextChanged(object sender, EventArgs e)
         {
+            if (isLoadingFile)
+                return;
+
             try
             {
                 string currentText = source.Text;
@@ -551,19 +760,34 @@ public partial class Form1 : Form
                 try
                 {
                     currentFilePath = openFileDialog.FileName;
-                    using (StreamReader reader = new StreamReader(currentFilePath, Encoding.UTF8))
-                    {
-                        source.Text = "";
-                        string line;
-                        while ((line = reader.ReadLine()) != null)
-                        {
-                            source.AppendText(line + Environment.NewLine);
-                        }
-                    }
-                    this.Text = "Текстовий редактор - " + Path.GetFileName(currentFilePath);
+
+                   
+                    isLoadingFile = true;
+
+                    // Отримуємо відповідну фабрику на основі розширення файлу
+                    FileFactory factory = FileFactoryManager.GetFactory(currentFilePath);
+
+                    IFileLoader loader = factory.CreateLoader();
+
+                  
+                    string content = loader.Load(currentFilePath);
+
+                    source.Text = content;
+
+                    previousText = content;
+
+                    isLoadingFile = false;
+
+                    string extension = Path.GetExtension(currentFilePath).ToUpper();
+                    this.Text = $"Текстовий редактор - {Path.GetFileName(currentFilePath)} [{extension}]";
+
+                    MessageBox.Show($"Файл успішно завантажено через {factory.GetType().Name}!",
+                        "Успіх", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
+                    isLoadingFile = false;
+
                     MessageBox.Show("Помилка читання файлу: " + ex.Message,
                         "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
@@ -580,9 +804,16 @@ public partial class Form1 : Form
             {
                 try
                 {
-                    File.WriteAllText(currentFilePath, source.Text, Encoding.UTF8);
-                    MessageBox.Show("Файл збережено!", "Успіх",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // Отримуємо відповідну фабрику
+                    FileFactory factory = FileFactoryManager.GetFactory(currentFilePath);
+
+                
+                    IFileSaver saver = factory.CreateSaver();
+
+                    saver.Save(currentFilePath, source.Text);
+
+                    MessageBox.Show($"Файл збережено через {factory.GetType().Name}!",
+                        "Успіх", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
@@ -612,11 +843,15 @@ public partial class Form1 : Form
                 }
             }
 
+            isLoadingFile = true;
+
             source.Clear();
-            previousText = ""; 
+            previousText = "";
+
+            isLoadingFile = false;
+
             currentFilePath = "";
             this.Text = "Текстовий редактор - Новий документ";
-
         }
         private void ShowLog_Click(object sender, EventArgs e)
         {
@@ -721,10 +956,19 @@ public partial class Form1 : Form
                 try
                 {
                     currentFilePath = saveFileDialog.FileName;
-                    File.WriteAllText(currentFilePath, source.Text, Encoding.UTF8);
-                    this.Text = "Текстовий редактор - " + Path.GetFileName(currentFilePath);
-                    MessageBox.Show("Файл збережено!", "Успіх",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                    // Отримуємо відповідну фабрику
+                    FileFactory factory = FileFactoryManager.GetFactory(currentFilePath);
+
+                    IFileSaver saver = factory.CreateSaver();
+
+                    saver.Save(currentFilePath, source.Text);
+
+                    string extension = Path.GetExtension(currentFilePath).ToUpper();
+                    this.Text = $"Текстовий редактор - {Path.GetFileName(currentFilePath)} [{extension}]";
+
+                    MessageBox.Show($"Файл збережено через {factory.GetType().Name}!",
+                        "Успіх", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
