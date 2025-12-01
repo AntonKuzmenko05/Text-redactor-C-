@@ -12,7 +12,44 @@ using System.Threading.Tasks;
 
 namespace TextFileViewer
 {
-    public class EventLogger
+    using System;
+    using System.Reflection;
+
+  
+    public class Singleton<T> where T : class
+    {
+        private static T instance_;
+
+        protected Singleton() { }
+
+        public static T Instance
+        {
+            get
+            {
+                if (instance_ == null)
+                {
+                    instance_ = CreateInstance();
+                }
+                return instance_;
+            }
+        }
+
+        private static T CreateInstance()
+        {
+            var ctor = typeof(T).GetConstructor(
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null,
+                Type.EmptyTypes,
+                null);
+
+            if (ctor == null)
+                throw new InvalidOperationException($"{typeof(T).Name} має містити приватний або protected конструктор без параметрів.");
+
+            return (T)ctor.Invoke(null);
+        }
+    }
+
+    public class EventLogger : Singleton<EventLogger>
     {
         private static EventLogger instance_ = null;
 
@@ -22,17 +59,6 @@ namespace TextFileViewer
             Console.WriteLine("[EventLogger] Створено екземпляр логера");
         }
 
-        public static EventLogger Instance
-        {
-            get
-            {
-                if (instance_ == null)
-                {
-                    instance_ = new EventLogger();
-                }
-                return instance_;
-            }
-        }
 
         // Список всіх подій
         private List<LogEvent> events_;
@@ -353,8 +379,7 @@ public partial class Form1 : Form
 
             ToolStripMenuItem clearLog = new ToolStripMenuItem("Очистити журнал");
             clearLog.Click += ClearLog_Click;
-            // У InitializeComponent в меню "Log":
-
+          
             ToolStripMenuItem quickTest = new ToolStripMenuItem("Швидкий тест Singleton");
             quickTest.ShortcutKeys = Keys.F7;
             quickTest.Click += (s, e) => QuickSingletonTest.ShowQuickTest();
