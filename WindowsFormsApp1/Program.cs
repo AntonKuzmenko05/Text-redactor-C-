@@ -9,11 +9,150 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading.Tasks;
 
-///TODO maybe fuul html
 namespace TextFileViewer
 {
     using System;
     using System.Reflection;
+
+    // Observer Pattern для відстеження подій редагування
+    public interface ITextObserver
+    {
+        void Update(TextEvent textEvent);
+    }
+
+    public enum TextEventType
+    {
+        IntegerDetected,
+        ParagraphAdded,
+        AutoSaved
+    }
+    //клас для івенту 2 частини ідз
+    public class TextEvent
+    {
+        public TextEventType Type { get; set; }
+        public string Data { get; set; }
+        public DateTime Timestamp { get; set; }
+
+        public TextEvent(TextEventType type, string data)
+        {
+            Type = type;
+            Data = data;
+            Timestamp = DateTime.Now;
+        }
+    }
+
+    // Паблішер
+    public class TextEditorSubject
+    {
+        private List<ITextObserver> observers = new List<ITextObserver>();
+
+        public void Attach(ITextObserver observer)
+        {
+            if (!observers.Contains(observer))
+            {
+                observers.Add(observer);
+            }
+        }
+
+        public void Detach(ITextObserver observer)
+        {
+            observers.Remove(observer);
+        }
+
+        public void Notify(TextEvent textEvent)
+        {
+            foreach (var observer in observers)
+            {
+                observer.Update(textEvent);
+            }
+        }
+    }
+    public class IntegerDetectorObserver : ITextObserver
+    {
+        private Form parentForm;
+
+        public IntegerDetectorObserver(Form parent)
+        {
+            parentForm = parent;
+        }
+
+        public void Update(TextEvent textEvent)
+        {
+            if (textEvent.Type == TextEventType.IntegerDetected)
+            {
+                if (parentForm.InvokeRequired)
+                {
+                    parentForm.Invoke(new Action(() => ShowMessage(textEvent.Data)));
+                }
+                else
+                {
+                    ShowMessage(textEvent.Data);
+                }
+            }
+        }
+
+        private void ShowMessage(string number)
+        {
+            MessageBox.Show($"Виявлено нове ціле число: {number}",
+                "Integer Detector",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+    }
+
+    public class AutoSaveObserver : ITextObserver
+    {
+        private Form1 editorForm;
+        private Form parentForm;
+
+        public AutoSaveObserver(Form1 editor, Form parent)
+        {
+            editorForm = editor;
+            parentForm = parent;
+        }
+
+        public async void Update(TextEvent textEvent)
+        {
+            if (textEvent.Type == TextEventType.ParagraphAdded)
+            {
+                await Task.Run(() => PerformAutoSave());
+            }
+            else if (textEvent.Type == TextEventType.AutoSaved)
+            {
+                if (parentForm.InvokeRequired)
+                {
+                    parentForm.Invoke(new Action(() => ShowSaveMessage()));
+                }
+                else
+                {
+                    ShowSaveMessage();
+                }
+            }
+        }
+
+        private void PerformAutoSave()
+        {
+            if (parentForm.InvokeRequired)
+            {
+                parentForm.Invoke(new Action(() => editorForm.PerformAutoSave()));
+            }
+            else
+            {
+                editorForm.PerformAutoSave();
+            }
+        }
+
+        private void ShowSaveMessage()
+        {
+            MessageBox.Show("Дані у файлі оновлено (автозбереження)",
+                "Auto Save",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+    }
+
+
+
 
     // Базові інтерфейси для завантажувачів та зберігачів
     public interface IFileLoader
@@ -261,7 +400,7 @@ namespace TextFileViewer
 
     public class EventLogger : Singleton<EventLogger>
     {
-        private static EventLogger instance_ = null;
+        //private static EventLogger instance_ = null;
 
         private EventLogger()
         {
@@ -437,7 +576,13 @@ public partial class Form1 : Form
         private static readonly HttpClient httpClient = new HttpClient();
 
         private string previousText = "";
-      
+
+        private TextEditorSubject textSubject;
+        private IntegerDetectorObserver integerObserver;
+        private AutoSaveObserver autoSaveObserver;
+        private string lastProcessedText = "";
+        private HashSet<string> detectedIntegers = new HashSet<string>();
+
         public Form1()
         {
             InitializeComponent();
@@ -593,6 +738,11 @@ public partial class Form1 : Form
             quickTest.Click += (s, e) => QuickSingletonTest.ShowQuickTest();
             logMenu.DropDownItems.Add(quickTest);
 
+            ToolStripMenuItem testObserver = new ToolStripMenuItem("Тест Observer Pattern");
+            testObserver.ShortcutKeys = Keys.F8;
+            testObserver.Click += TestObserver_Click;
+            logMenu.DropDownItems.Add(testObserver);
+
             logMenu.DropDownItems.Add(showLog);
             logMenu.DropDownItems.Add(showLogStats);
             logMenu.DropDownItems.Add(new ToolStripSeparator());
@@ -625,9 +775,19 @@ public partial class Form1 : Form
             this.Controls.Add(source);
 
             source.TextChanged += Source_TextChanged;
-
+            source.KeyDown += Source_NewEnter;
             var logger = EventLogger.Instance;
             Console.WriteLine("EventLogger ініціалізовано");
+
+            // Ініціалізація Observerа
+            textSubject = new TextEditorSubject();
+            integerObserver = new IntegerDetectorObserver(this);
+            autoSaveObserver = new AutoSaveObserver(this, this);
+
+            textSubject.Attach(integerObserver);
+            textSubject.Attach(autoSaveObserver);
+
+            Console.WriteLine("Observer Pattern ініціалізовано");
 
             openFileDialog = new OpenFileDialog();
             openFileDialog.Filter = "All supported|*.txt;*.html;*.htm;*.bin;*.dat;*.cs|Text files|*.txt|HTML files|*.html;*.htm|Binary files|*.bin;*.dat|C# files|*.cs|All files|*.*";
@@ -636,22 +796,108 @@ public partial class Form1 : Form
             saveFileDialog.Filter = "Text files|*.txt|HTML files|*.html|Binary files|*.bin|C# files|*.cs|All files|*.*";
         }
 
+
         private async void Source_TextChanged(object sender, EventArgs e)
         {
-           
             string currentText = source.Text;
             string oldText = previousText;
 
-            // Оновлюємо previousText одразу, щоб наступна подія мала актуальні дані
             previousText = currentText;
 
-            // Якщо змін немає виходимо
             if (currentText == oldText) return;
 
             await Task.Run(() =>
             {
                 ProcessTextChange(oldText, currentText);
+                CheckForIntegers(currentText);
             });
+        }
+        private void Source_NewEnter(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                var textEvent = new TextEvent(TextEventType.ParagraphAdded,
+                        $"Додано абзац");
+                textSubject.Notify(textEvent);
+            }
+        }
+        private void CheckForIntegers(string text)
+        {
+            try
+            {
+                // Регулярний вираз для виявлення цілих чисел
+                string pattern = @"(?:^|[\s\p{P}])(-?\d+)(?=[\s\p{P}]|$)";
+                MatchCollection matches = Regex.Matches(text, pattern);
+
+                foreach (Match match in matches)
+                {
+                    string number = match.Groups[1].Value;
+
+                    if (!detectedIntegers.Contains(number))
+                    {
+                        detectedIntegers.Add(number);
+
+                        var textEvent = new TextEvent(TextEventType.IntegerDetected, number);
+                        textSubject.Notify(textEvent);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Помилка виявлення чисел: {ex.Message}");
+            }
+        }
+
+        //private void CheckForNewParagraph(string oldText, string newText)
+        //{
+        //    try
+        //    {
+        //        // Виявляємо додавання нового абзацу (подвійний Enter)
+        //        int oldParagraphs = Regex.Matches(oldText, @"\r?\n\r?\n").Count;
+        //        int newParagraphs = Regex.Matches(newText, @"\r?\n\r?\n").Count;
+
+        //        if (newParagraphs > oldParagraphs)
+        //        {
+        //            var textEvent = new TextEvent(TextEventType.ParagraphAdded,
+        //                $"Додано {newParagraphs - oldParagraphs} абзац(ів)");
+        //            textSubject.Notify(textEvent);
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Console.WriteLine($"Помилка виявлення абзаців: {ex.Message}");
+        //    }
+        //}
+
+        public void PerformAutoSave()
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(currentFilePath))
+                {
+                    FileFactory factory = FileFactoryManager.GetFactory(currentFilePath);
+                    IFileSaver saver = factory.CreateSaver();
+
+                    string textToSave = "";
+                    if (source.InvokeRequired)
+                    {
+                        source.Invoke(new Action(() => textToSave = source.Text));
+                    }
+                    else
+                    {
+                        textToSave = source.Text;
+                    }
+
+                    saver.Save(currentFilePath, textToSave);
+
+                    var textEvent = new TextEvent(TextEventType.AutoSaved, currentFilePath);
+                    textSubject.Notify(textEvent);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Помилка автозбереження: {ex.Message}");
+            }
         }
 
         private void ProcessTextChange(string oldText, string currentText)
@@ -1776,6 +2022,25 @@ public partial class Form1 : Form
             {
                 return passed ? "PASS" : "FAIL";
             }
+
+        }
+        private void TestObserver_Click(object sender, EventArgs e)
+        {
+            StringBuilder info = new StringBuilder();
+            info.AppendLine("========== ТЕСТ OBSERVER PATTERN ==========");
+            info.AppendLine();
+            info.AppendLine("Активні спостерігачі:");
+            info.AppendLine("1. IntegerDetectorObserver - виявлення цілих чисел");
+            info.AppendLine("2. AutoSaveObserver - автозбереження після абзацу");
+            info.AppendLine();
+            info.AppendLine("Спробуйте:");
+            info.AppendLine("• Ввести число, виокремлене пробілами");
+            info.AppendLine("• Додати новий абзац (двічі натиснути Enter)");
+            info.AppendLine();
+            info.AppendLine($"Виявлено унікальних чисел: {detectedIntegers.Count}");
+
+            MessageBox.Show(info.ToString(), "Observer Pattern Test",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         [STAThread]
