@@ -9,7 +9,7 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading.Tasks;
 
-
+///TODO maybe fuul html
 namespace TextFileViewer
 {
     using System;
@@ -321,7 +321,7 @@ namespace TextFileViewer
 
         public int EventCount => events_.Count;
 
-        public void SaveToFile(string filePath)
+        public async Task SaveToFile(string filePath)
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("========================================");
@@ -339,8 +339,11 @@ namespace TextFileViewer
                 sb.AppendLine(evt.ToDetailedString());
                 sb.AppendLine(new string('-', 60));
             }
-
-            File.WriteAllText(filePath, sb.ToString(), Encoding.UTF8);
+            string logContent = sb.ToString();
+            await Task.Run(() =>
+            {
+                File.WriteAllText(filePath, logContent, Encoding.UTF8);
+            });
         }
 
         /// Отримує статистику подій
@@ -348,8 +351,7 @@ namespace TextFileViewer
         {
             int addCount = 0;
             int deleteCount = 0;
-            int pasteCount = 0;
-            int cutCount = 0;
+         
 
             foreach (var evt in events_)
             {
@@ -435,7 +437,7 @@ public partial class Form1 : Form
         private static readonly HttpClient httpClient = new HttpClient();
 
         private string previousText = "";
-        private bool isLoadingFile = false;
+      
         public Form1()
         {
             InitializeComponent();
@@ -634,109 +636,126 @@ public partial class Form1 : Form
             saveFileDialog.Filter = "Text files|*.txt|HTML files|*.html|Binary files|*.bin|C# files|*.cs|All files|*.*";
         }
 
-        private void Source_TextChanged(object sender, EventArgs e)
+        private async void Source_TextChanged(object sender, EventArgs e)
         {
-            if (isLoadingFile)
-                return;
+           
+            string currentText = source.Text;
+            string oldText = previousText;
 
+            // Оновлюємо previousText одразу, щоб наступна подія мала актуальні дані
+            previousText = currentText;
+
+            // Якщо змін немає виходимо
+            if (currentText == oldText) return;
+
+            await Task.Run(() =>
+            {
+                ProcessTextChange(oldText, currentText);
+            });
+        }
+
+        private void ProcessTextChange(string oldText, string currentText)
+        {
             try
             {
-                string currentText = source.Text;
-
-                if (currentText.Length > previousText.Length)
+                if (currentText.Length > oldText.Length)
                 {
-                    // Додано текст
-                    int diffLength = currentText.Length - previousText.Length;
-                    string addedText = "";
-
-                    // Знаходимо позицію зміни
-                    int changePos = FindChangePosition(previousText, currentText);
+                    // nекст додано 
+                    int diffLength = currentText.Length - oldText.Length;
+                    int changePos = FindChangePosition(oldText, currentText);
 
                     if (changePos >= 0 && changePos + diffLength <= currentText.Length)
                     {
-                        addedText = currentText.Substring(changePos, diffLength);
-                    }
+                        string addedText = currentText.Substring(changePos, diffLength);
 
-                    // Обчислюємо позицію курсору
-                    int position = source.SelectionStart;
-                    var lineInfo = GetLineAndCharPosition(position);
+                        var (currentLine, currentChar) = GetLineAndCharPosition(currentText, changePos);
 
-                    for (int i = 0; i < addedText.Length; i++)
-                    {
-                        char ch = addedText[i];
-                        var charLineInfo = GetLineAndCharPosition(changePos + i);
+                        foreach (char ch in addedText)
+                        {
+                            EventLogger.Instance.LogEvent(
+                                EventType.CharAdded,
+                                currentLine,
+                                currentChar,
+                                ch.ToString()
+                            );
 
-                        EventLogger.Instance.LogEvent(
-                            EventType.CharAdded,
-                            charLineInfo.Line,
-                            charLineInfo.Char,
-                            ch.ToString()
-                        );
+                            if (ch == '\n')
+                            {
+                                currentLine++;
+                                currentChar = 1;
+                            }
+                            else
+                            {
+                                currentChar++;
+                            }
+                        }
                     }
                 }
-                else if (currentText.Length < previousText.Length)
+                else if (currentText.Length < oldText.Length)
                 {
-                    // Видалено текст
-                    int diffLength = previousText.Length - currentText.Length;
+                    // Текст видалено 
+                    int diffLength = oldText.Length - currentText.Length;
+                    int changePos = FindChangePosition(currentText, oldText);
 
-                    int changePos = FindChangePosition(currentText, previousText);
-                    string deletedText = "";
-
-                    if (changePos >= 0 && changePos + diffLength <= previousText.Length)
+                    if (changePos >= 0 && changePos + diffLength <= oldText.Length)
                     {
-                        deletedText = previousText.Substring(changePos, diffLength);
-                    }
+                        string deletedText = oldText.Substring(changePos, diffLength);
 
-                    int position = source.SelectionStart;
+                        var (currentLine, currentChar) = GetLineAndCharPosition(oldText, changePos);
 
-                    for (int i = 0; i < deletedText.Length; i++)
-                    {
-                        char ch = deletedText[i];
-                        var charLineInfo = GetLineAndCharPosition(changePos + i);
+                        foreach (char ch in deletedText)
+                        {
+                            EventLogger.Instance.LogEvent(
+                                EventType.CharDeleted,
+                                currentLine,
+                                currentChar,
+                                ch.ToString()
+                            );
 
-                        EventLogger.Instance.LogEvent(
-                            EventType.CharDeleted,
-                            charLineInfo.Line,
-                            charLineInfo.Char,
-                            ch.ToString()
-                        );
+                            if (ch == '\n')
+                            {
+                                currentLine++;
+                                currentChar = 1;
+                            }
+                            else
+                            {
+                                currentChar++;
+                            }
+                        }
                     }
                 }
-
-                previousText = currentText;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Помилка логування: {ex.Message}");
+                Console.WriteLine($"Помилка фонового логування: {ex.Message}");
             }
         }
 
-        /// Знаходить позицію першої зміни між двома текстами
         private int FindChangePosition(string oldText, string newText)
         {
             int minLength = Math.Min(oldText.Length, newText.Length);
-
+           
             for (int i = 0; i < minLength; i++)
             {
                 if (oldText[i] != newText[i])
                     return i;
             }
-
             return minLength;
         }
 
-        /// Обчислює номер рядка та позицію символу в рядку
-        private (int Line, int Char) GetLineAndCharPosition(int absolutePosition)
+        private (int Line, int Char) GetLineAndCharPosition(string text, int absolutePosition)
         {
-            if (string.IsNullOrEmpty(source.Text) || absolutePosition < 0)
+            if (string.IsNullOrEmpty(text) || absolutePosition < 0)
                 return (1, 1);
 
             int line = 1;
             int charPos = 1;
 
-            for (int i = 0; i < Math.Min(absolutePosition, source.Text.Length); i++)
+            int limit = Math.Min(absolutePosition, text.Length);
+
+            for (int i = 0; i < limit; i++)
             {
-                if (source.Text[i] == '\n')
+                if (text[i] == '\n')
                 {
                     line++;
                     charPos = 1;
@@ -761,8 +780,7 @@ public partial class Form1 : Form
                 {
                     currentFilePath = openFileDialog.FileName;
 
-                   
-                    isLoadingFile = true;
+                  
 
                     // Отримуємо відповідну фабрику на основі розширення файлу
                     FileFactory factory = FileFactoryManager.GetFactory(currentFilePath);
@@ -776,7 +794,7 @@ public partial class Form1 : Form
 
                     previousText = content;
 
-                    isLoadingFile = false;
+                  
 
                     string extension = Path.GetExtension(currentFilePath).ToUpper();
                     this.Text = $"Текстовий редактор - {Path.GetFileName(currentFilePath)} [{extension}]";
@@ -786,7 +804,6 @@ public partial class Form1 : Form
                 }
                 catch (Exception ex)
                 {
-                    isLoadingFile = false;
 
                     MessageBox.Show("Помилка читання файлу: " + ex.Message,
                         "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -843,12 +860,10 @@ public partial class Form1 : Form
                 }
             }
 
-            isLoadingFile = true;
 
             source.Clear();
             previousText = "";
 
-            isLoadingFile = false;
 
             currentFilePath = "";
             this.Text = "Текстовий редактор - Новий документ";
